@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宿舍值日表</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 40px; background: #f4f5f7; color: #1f2329;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; display: flex; justify-content: center;
+  }
+  main { width: 100%; max-width: 460px; }
+  h1 { font-size: 17px; font-weight: 600; color: #5b6270; margin: 0 0 12px; }
+  .card {
+    background: #fff; border-radius: 18px; padding: 28px 24px; text-align: center;
+    box-shadow: 0 2px 10px rgba(20, 30, 60, .06);
+  }
+  .label { margin: 0 0 12px; font-size: 13px; color: #8a919e; }
+  .who { font-size: 40px; font-weight: 700; line-height: 1.2; letter-spacing: 2px; }
+  .who.all { font-size: 32px; letter-spacing: 1px; }
+  .reason { margin: 14px 0 0; font-size: 14px; color: #6b7280; }
+  .adjusted {
+    display: inline-block; margin: 12px 0 0; padding: 4px 12px; border-radius: 999px;
+    font-size: 13px; color: #c2410c; background: #fff7ed;
+  }
+  .actions { display: flex; gap: 10px; margin-top: 16px; }
+  button {
+    flex: 1; padding: 12px 16px; border: 1px solid transparent; border-radius: 12px;
+    font: inherit; font-size: 15px; color: #fff; background: #2f6fed; cursor: pointer;
+  }
+  button:active { transform: translateY(1px); }
+  button.ghost { flex: 0 0 auto; padding: 12px 14px; color: #2f6fed; background: #fff; border-color: #cdd9f5; }
+  .picker {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
+    padding: 14px; background: #fff; border-radius: 16px; box-shadow: 0 2px 10px rgba(20, 30, 60, .06);
+  }
+  .picker button { color: #1f2329; background: #f2f4f8; border-color: #e2e6ee; }
+  .picker button.cancel { grid-column: 1 / -1; color: #6b7280; background: #fff; border-color: #e2e6ee; }
+  h2 { margin: 26px 0 10px; font-size: 14px; font-weight: 600; color: #5b6270; }
+  ul {
+    margin: 0; padding: 0; list-style: none; background: #fff; border-radius: 16px;
+    overflow: hidden; box-shadow: 0 2px 10px rgba(20, 30, 60, .06);
+  }
+  li { display: flex; justify-content: space-between; gap: 12px; padding: 13px 16px; font-size: 15px; border-top: 1px solid #f0f2f6; }
+  li:first-child { border-top: 0; }
+  li .d { color: #5b6270; }
+  li .p { font-weight: 600; }
+  li .p.all { font-weight: 500; color: #8a919e; }
+  .note { margin: 22px 0 0; font-size: 12px; line-height: 1.7; color: #9aa1ad; }
+  .note.warn { color: #c2410c; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>宿舍值日表</h1>
+
+  <section class="card">
+    <p class="label" id="dateLabel"></p>
+    <div class="who" id="who"></div>
+    <p class="reason" id="reason"></p>
+    <p class="adjusted" id="adjusted" hidden></p>
+  </section>
+
+  <div class="actions">
+    <button id="btnEdit">修改今天值日生</button>
+    <button id="btnReset" class="ghost" hidden>重置今天</button>
+  </div>
+  <div class="picker" id="picker" hidden></div>
+
+  <h2>未来 7 天</h2>
+  <ul id="upcoming"></ul>
+
+  <p class="note" id="coverage" hidden></p>
+  <p class="note">
+    节假日表：2026 年官方安排（放了假的日期四人一起值日，调休补班的周末按工作日轮转）。
+    每年新安排公布后，用记事本打开本文件，更新顶部的 HOLIDAYS 和 MAKEUP_WORKDAYS 两块即可。
+  </p>
+</main>
+
+<script>
+/* ===== 可编辑区（每年更新这里） ===== */
+
+// 床位顺序，轮转按这个顺序循环
+const PEOPLE = ['林健霆', '蔡梓铠', '戴峻熙', '莫可名'];
+
+// 基准：这一天轮到这个人，其它日期都由它推算
+const ANCHOR = { date: '2026-09-21', person: '莫可名' };
+
+// 法定节假日（四人一起值日），格式 'YYYY-MM-DD': '节日名'
+const HOLIDAYS = {
+  '2026-01-01': '元旦', '2026-01-02': '元旦', '2026-01-03': '元旦',
+  '2026-02-15': '春节', '2026-02-16': '春节', '2026-02-17': '春节',
+  '2026-02-18': '春节', '2026-02-19': '春节', '2026-02-20': '春节',
+  '2026-02-21': '春节', '2026-02-22': '春节', '2026-02-23': '春节',
+  '2026-04-04': '清明节', '2026-04-05': '清明节', '2026-04-06': '清明节',
+  '2026-05-01': '劳动节', '2026-05-02': '劳动节', '2026-05-03': '劳动节',
+  '2026-05-04': '劳动节', '2026-05-05': '劳动节',
+  '2026-06-19': '端午节', '2026-06-20': '端午节', '2026-06-21': '端午节',
+  '2026-09-25': '中秋节', '2026-09-26': '中秋节', '2026-09-27': '中秋节',
+  '2026-10-01': '国庆节', '2026-10-02': '国庆节', '2026-10-03': '国庆节',
+  '2026-10-04': '国庆节', '2026-10-05': '国庆节', '2026-10-06': '国庆节',
+  '2026-10-07': '国庆节'
+};
+
+// 调休补班的周末（算工作日，按床位顺序轮转）
+const MAKEUP_WORKDAYS = [
+  '2026-01-04', '2026-02-14', '2026-02-28', '2026-05-09', '2026-09-20', '2026-10-10'
+];
+
+/* ===== 可编辑区结束 ===== */
+
+const STORAGE_KEY = 'dorm-duty-overrides-v1';
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+const keyOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dateOf = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const nextDay = k => { const d = dateOf(k); d.setDate(d.getDate() + 1); return keyOf(d); };
+
+const isHoliday = k => Object.prototype.hasOwnProperty.call(HOLIDAYS, k);
+const isMakeup = k => MAKEUP_WORKDAYS.includes(k);
+// 工作日 = 调休补班的周末，或既不是节假日也不是双休的日子
+const isWorkday = k => isMakeup(k) || (!isHoliday(k) && ![0, 6].includes(dateOf(k).getDay()));
+const isRest = k => !isWorkday(k);
+
+function loadOverrides() {
+  try {
+    const o = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return o && typeof o === 'object' ? o : {};
+  } catch (e) { return {}; }
+}
+function saveOverrides(o) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(o));
+}
+function withoutDate(o, k) {
+  const copy = { ...o };
+  delete copy[k];
+  return copy;
+}
+
+// 某天按规则应轮到谁；休息日返回 '全体'
+function basePerson(k, overrides) {
+  if (isRest(k)) return '全体';
+
+  // 取「不晚于 k 的最近一次工作日改动」作为新的轮转起点，没有改动就用基准日
+  let start = ANCHOR;
+  let latest = null;
+  for (const [d, p] of Object.entries(overrides)) {
+    if (d <= k && !isRest(d) && (!latest || d > latest.date)) latest = { date: d, person: p };
+  }
+  if (latest) start = latest;
+
+  const startIndex = PEOPLE.indexOf(start.person);
+  if (k < start.date) {
+    // 落在起点之前：往回数轮转日
+    let n = 0;
+    for (let d = k; d < start.date; d = nextDay(d)) if (isWorkday(d)) n++;
+    return PEOPLE[(startIndex - (n % PEOPLE.length) + PEOPLE.length) % PEOPLE.length];
+  }
+  let n = 0;
+  for (let d = start.date; d <= k; d = nextDay(d)) if (isWorkday(d)) n++;
+  return PEOPLE[(startIndex + n - 1) % PEOPLE.length];
+}
+
+// 今天实际显示的人和「没被改动时」的人
+function scheduleFor(k, overrides) {
+  const rule = basePerson(k, withoutDate(overrides, k));
+  if (isRest(k)) {
+    const changed = Boolean(overrides[k]);
+    return { person: changed ? overrides[k] : '全体', rule, changed };
+  }
+  return { person: basePerson(k, overrides), rule, changed: basePerson(k, overrides) !== rule };
+}
+
+function reasonText(k) {
+  if (isHoliday(k)) return `${HOLIDAYS[k]}假期，四人一起值日`;
+  if (isMakeup(k)) return '调休补班日，按床位顺序轮转';
+  const dow = dateOf(k).getDay();
+  if (dow === 0 || dow === 6) return '双休日，四人一起值日';
+  return '工作日，按床位顺序轮转';
+}
+
+const COVERED_YEARS = [...new Set(Object.keys(HOLIDAYS).map(k => k.slice(0, 4)))].sort();
+const MAX_YEAR = COVERED_YEARS[COVERED_YEARS.length - 1];
+
+/* ===== 页面渲染 ===== */
+
+const $ = id => document.getElementById(id);
+const today = keyOf(new Date());
+const overrides = loadOverrides();
+
+function labelOf(k) {
+  const d = dateOf(k);
+  return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEKDAYS[d.getDay()]}`;
+}
+
+function render() {
+  const todaySchedule = scheduleFor(today, overrides);
+
+  $('dateLabel').textContent = `${dateOf(today).getFullYear()}年${labelOf(today)}`;
+
+  const who = $('who');
+  who.textContent = todaySchedule.person === '全体' ? '大家一起值日' : todaySchedule.person;
+  who.classList.toggle('all', todaySchedule.person === '全体');
+
+  $('reason').textContent = reasonText(today);
+
+  const adjusted = $('adjusted');
+  adjusted.hidden = !todaySchedule.changed;
+  adjusted.textContent = todaySchedule.person === '全体'
+    ? `原本：${todaySchedule.rule}`
+    : `已手动调整（原本 ${todaySchedule.rule}）`;
+
+  $('btnReset').hidden = !overrides[today];
+
+  const list = $('upcoming');
+  list.innerHTML = '';
+  let k = nextDay(today);
+  for (let i = 0; i < 7; i++, k = nextDay(k)) {
+    const s = scheduleFor(k, overrides);
+    const li = document.createElement('li');
+    const d = document.createElement('span');
+    d.className = 'd';
+    d.textContent = labelOf(k);
+    const p = document.createElement('span');
+    p.className = 'p' + (s.person === '全体' ? ' all' : '');
+    p.textContent = s.person === '全体' ? '四人一起' : s.person;
+    li.append(d, p);
+    list.appendChild(li);
+  }
+
+  const coverage = $('coverage');
+  const showCoverage = Number(today.slice(0, 4)) > Number(MAX_YEAR);
+  coverage.hidden = !showCoverage;
+  coverage.classList.add('warn');
+  coverage.textContent = `节假日表只更新到 ${MAX_YEAR} 年，${today.slice(0, 4)} 年的安排还没有，目前只按双休日判断。`;
+}
+
+function renderPicker() {
+  const picker = $('picker');
+  picker.innerHTML = '';
+  for (const name of PEOPLE) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.onclick = () => {
+      overrides[today] = name;
+      saveOverrides(overrides);
+      closePicker();
+      render();
+    };
+    picker.appendChild(b);
+  }
+  const cancel = document.createElement('button');
+  cancel.className = 'cancel';
+  cancel.textContent = '取消';
+  cancel.onclick = closePicker;
+  picker.appendChild(cancel);
+}
+
+function openPicker() {
+  renderPicker();
+  $('picker').hidden = false;
+}
+function closePicker() {
+  $('picker').hidden = true;
+}
+
+$('btnEdit').onclick = () => ($('picker').hidden ? openPicker() : closePicker());
+$('btnReset').onclick = () => {
+  delete overrides[today];
+  saveOverrides(overrides);
+  closePicker();
+  render();
+};
+
+render();
+</script>
+</body>
+</html>
